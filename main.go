@@ -1,60 +1,67 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
+	"net/http"
 	"os"
-	"path-scanner/tools"
+	"time"
 
 	"github.com/fatih/color"
 )
 
-func main() {
-	fmt.Println("Welcome to the Scanner Tool")
-	fmt.Println("Select an option:")
-	fmt.Println("1. Scan paths")
-	fmt.Println("2. Test SQL Injection")
-	fmt.Println("3. Exit")
-
-	var choice int
-	fmt.Scanln(&choice)
-
-	switch choice {
-	case 1:
-		scanPaths()
-	case 2:
-		testSQLInjection()
-	case 3:
-		os.Exit(0)
-	default:
-		fmt.Println("Invalid choice. Please try again.")
-	}
+type HasilScan struct {
+	Path   string
+	Status string
 }
 
-func scanPaths() {
-	fmt.Print("Enter target URL: ")
-	var targetURL string
-	fmt.Scanln(&targetURL)
-
-	paths, err := tools.ReadPathsFromFile("path.txt")
+func ReadPathsFromFile(filename string) ([]string, error) {
+	file, err := os.Open(filename)
 	if err != nil {
-		fmt.Println("Error reading paths from file:", err)
-		return
+		return nil, err
+	}
+	defer file.Close()
+
+	var paths []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		paths = append(paths, scanner.Text())
 	}
 
-	results := tools.ScanPaths(targetURL, paths)
-	printResults(results)
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return paths, nil
 }
 
-func testSQLInjection() {
-	fmt.Print("Enter target URL: ")
-	var targetURL string
-	fmt.Scanln(&targetURL)
+func ScanPaths(baseURL string, paths []string) []HasilScan {
+	client := &http.Client{Timeout: 5 * time.Second}
+	results := []HasilScan{}
 
-	results := tools.TestSQLInjection(targetURL)
-	printSQLInjectionResults(results)
+	for _, path := range paths {
+		url := fmt.Sprintf("%s/%s", baseURL, path)
+		status := CheckPath(client, url)
+		results = append(results, HasilScan{Path: path, Status: status})
+	}
+
+	return results
 }
 
-func printResults(results []tools.HasilScan) {
+func CheckPath(client *http.Client, url string) string {
+	resp, err := client.Get(url)
+	if err != nil {
+		return "Error"
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 200 {
+		return "Found"
+	}
+	return "Not Found"
+}
+
+func printResults(results []HasilScan) {
 	fmt.Println("\nScan Results:")
 	for _, result := range results {
 		if result.Status == "Found" {
@@ -65,14 +72,19 @@ func printResults(results []tools.HasilScan) {
 	}
 }
 
-func printSQLInjectionResults(results []tools.SQLInjectionResult) {
-	fmt.Println("\nSQL Injection Scan Results:")
-	for _, result := range results {
-		if result.Vulnerable {
-			color.Red("URL: %s, Status: Vulnerable\n", result.URL)
-		} else {
-			color.Green("URL: %s, Status: Not Vulnerable\n", result.URL)
-		}
+func main() {
+	fmt.Println("Welcome to the Path Scanner Tool")
+	fmt.Print("Enter base URL (e.g., https://example.com): ")
+	var baseURL string
+	fmt.Scanln(&baseURL)
+
+	paths, err := ReadPathsFromFile("path.txt")
+	if err != nil {
+		fmt.Println("Error reading paths from file:", err)
+		return
 	}
+
+	results := ScanPaths(baseURL, paths)
+	printResults(results)
 }
 
